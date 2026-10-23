@@ -129,7 +129,6 @@ export const translations = {
 
     footer: {
       tagline: 'Right supplies, to the right people, in the right order—and a clear reason why.',
-      badge: 'CL-03 · Disaster Relief Resource Optimizer',
       explore: 'Explore', platform: 'The platform', ops: 'Operations view', sim: 'What-if simulator',
       workflows: 'Workflows', reqPriority: 'Requests & priority', invRoutes: 'Inventory & routes', human: 'Human impact',
       prototype: 'Prototype', top: 'Back to top ↑', about: 'About this demo', sample: 'Submit a sample request',
@@ -276,7 +275,6 @@ export const translations = {
 
     footer: {
       tagline: 'درست سامان، درست لوگوں تک، درست ترتیب میں—اور اس کی واضح وجہ کے ساتھ۔',
-      badge: 'CL-03 · آفات میں امدادی وسائل کا آپٹیمائزر',
       explore: 'دریافت کریں', platform: 'پلیٹ فارم', ops: 'آپریشنز منظر', sim: '"کیا ہو اگر" سمیولیٹر',
       workflows: 'ورک فلو', reqPriority: 'درخواستیں اور ترجیح', invRoutes: 'ذخیرہ اور راستے', human: 'انسانی اثر',
       prototype: 'پروٹوٹائپ', top: 'اوپر واپس جائیں ↑', about: 'اس ڈیمو کے بارے میں', sample: 'نمونہ درخواست جمع کرائیں',
