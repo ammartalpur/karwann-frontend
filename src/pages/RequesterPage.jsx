@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createRequest, getWeights } from "../lib/api.js";
-import { aiHealth, analyseAudio, analyseReport } from "../lib/aiApi.js";
+import { analyseAudio, analyseReport } from "../lib/aiApi.js";
 import { URGENCY, ACCESS, ITEMS, ITEM_LABEL } from "../lib/constants.js";
 import MapView from "../components/MapView.jsx";
 import ScoreBars from "../components/ScoreBars.jsx";
@@ -38,7 +38,6 @@ export default function RequesterPage() {
 
   useEffect(() => {
     getWeights().then(setWeights).catch(() => {});
-    aiHealth().catch(() => {}); // wake a sleeping AI host early; the manual form never depends on it
   }, []);
 
   const touch = (k) => setTouched((t) => ({ ...t, [k]: true }));

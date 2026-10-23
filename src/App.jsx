@@ -1,5 +1,5 @@
 import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import RequestsPage from "./pages/RequestsPage.jsx";
 import RequesterPage from "./pages/RequesterPage.jsx";
 import InventoryPage from "./pages/InventoryPage.jsx";
@@ -15,6 +15,7 @@ import LanguageToggle from "./components/LanguageToggle.jsx";
 import OpenDemoButton from "./components/OpenDemoButton.jsx";
 import SiteChatWidget from "./components/SiteChatWidget.jsx";
 import { clearSession, getSession, ROLE_CONFIG, saveSession } from "./lib/auth.js";
+import { aiHealth } from "./lib/aiApi.js";
 import Karwan from "./pages/Karwan.jsx";
 import BrandLogo from "./components/BrandLogo.jsx";
 
@@ -35,6 +36,12 @@ export default function App() {
   const [session, setSession] = useState(() => getSession());
   const navigate = useNavigate();
   const location = useLocation();
+
+  useEffect(() => {
+    // Wake a sleeping AI host as soon as any Karwan page opens. The website
+    // remains usable if the host is unavailable or still starting.
+    aiHealth().catch(() => {});
+  }, []);
 
 if (location.pathname === "/") {
   return (
