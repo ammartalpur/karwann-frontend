@@ -29,13 +29,25 @@ const MOCK_OFF = new Set([
   "requests", "weights", "inventory", "dashboard", "allocation",
   "simulator", "routes", "deliveries", "reset",
 ]);
-const mocked = (feature) => USE_MOCKS && !MOCK_OFF.has(feature);
+// VITE_MOCK_ALL=true forces every feature onto the bundled sample data (offline demos, screenshots).
+const MOCK_ALL = import.meta.env.VITE_MOCK_ALL === "true";
+const mocked = (feature) => USE_MOCKS && (MOCK_ALL || !MOCK_OFF.has(feature));
 
-async function http(path, opts = {}) {
+const inFlightGets = new Map();
+const HTTP_TIMEOUT_MS = 15000;
+
+async function performHttp(path, opts) {
+  const { body, headers: suppliedHeaders, ...fetchOptions } = opts;
+  const hasBody = body !== undefined && body !== null;
   const res = await fetch(BASE + path, {
-    headers: { "Content-Type": "application/json" },
-    ...opts,
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
+    ...fetchOptions,
+    headers: {
+      Accept: "application/json",
+      ...(hasBody ? { "Content-Type": "application/json" } : {}),
+      ...suppliedHeaders,
+    },
+    body: hasBody ? JSON.stringify(body) : undefined,
+    signal: fetchOptions.signal ?? AbortSignal.timeout(HTTP_TIMEOUT_MS),
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -44,6 +56,19 @@ async function http(path, opts = {}) {
     throw e;
   }
   return json.data;
+}
+
+async function http(path, opts = {}) {
+  const method = (opts.method || "GET").toUpperCase();
+  if (method !== "GET" || opts.body != null) return performHttp(path, opts);
+
+  // Several screens request the same overview data at mount time. Share only
+  // the active GET promise: responses are never cached or allowed to go stale.
+  const key = `${method}:${path}`;
+  if (inFlightGets.has(key)) return inFlightGets.get(key);
+  const pending = performHttp(path, opts).finally(() => inFlightGets.delete(key));
+  inFlightGets.set(key, pending);
+  return pending;
 }
 const wait = (ms = 250) => new Promise((r) => setTimeout(r, ms));
 const clone = (x) => JSON.parse(JSON.stringify(x));
@@ -382,6 +407,7 @@ function buildAllocationPlan(state = db) {
         depotId: choice?.depot.id ?? null,
         depotName: choice?.depot.name ?? "No depot available",
         vehicleId: choice?.vehicle?.id ?? null,
+        vehicleName: choice?.vehicle?.name ?? null,
         item: neededItem.item,
         qty,
         qtyNeeded: remainingNeed,

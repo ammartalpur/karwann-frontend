@@ -6,7 +6,9 @@ import intakeUnknown from "../mocks/ai/intake_unknown.json";
 
 const USE_MOCKS = import.meta.env.VITE_AI_USE_MOCKS === "true";
 const AI_URL = import.meta.env.VITE_AI_API_URL?.replace(/\/$/, "");
-const TIMEOUT_MS = { intake: 30000, chat: 30000, transcribe: 20000 };
+// Intake keeps the longer timeout required by the hosted Gemini/Render flow.
+// The optimization commit shortens only chat, where FastAPI already retries and fails over.
+const TIMEOUT_MS = { intake: 75000, chat: 25000, transcribe: 20000, speak: 90000, translate: 25000 };
 
 const wait = (ms = 600) => new Promise((r) => setTimeout(r, ms));
 const clone = (x) => JSON.parse(JSON.stringify(x));
@@ -19,6 +21,11 @@ export class AiError extends Error {
     this.requestId = requestId;
   }
 }
+
+// The AI service already retries transient Gemini errors and fails over to a
+// second key. Do not turn a server timeout into a second full browser wait.
+const shouldRetryImmediately = (error) =>
+  error instanceof AiError && error.retryable && error.code === "AI_UNAVAILABLE";
 
 async function aiFetch(path, { timeoutMs, ...opts }) {
   if (!AI_URL) {
@@ -61,7 +68,8 @@ export async function aiHealth() {
 
 /**
  * Text report -> editable structured fields. Does NOT save anything.
- * Retries automatically ONCE when the service says retryable=true.
+ * Retries once only for an immediate connection failure. Server timeouts are
+ * returned promptly because FastAPI already handles Gemini retries/fail-over.
  * Mock triggers: text containing "error" fails; very short text returns an all-unknown result.
  */
 export async function analyseReport({ text, uiLanguage }) {
@@ -81,7 +89,7 @@ export async function analyseReport({ text, uiLanguage }) {
   try {
     return await send();
   } catch (e) {
-    if (e instanceof AiError && e.retryable) return send();
+    if (shouldRetryImmediately(e)) return send();
     throw e;
   }
 }
@@ -122,7 +130,7 @@ const OFF_TOPIC = /capital|weather|recipe|joke|football|cricket|movie|president|
 
 /**
  * Ask the scoped assistant. The service reads live Karwan data and explains it; React never computes quantities.
- * Read-only, so one automatic retry on retryable errors is safe.
+ * Read-only; immediate connection failures get one retry.
  * Mock triggers: "error" -> timeout, "unavailable" -> Karwan API down, "capital"/"weather"/... -> refusal, "badin" -> factual answer.
  */
 export async function askAssistant({ question, uiLanguage }) {
@@ -153,7 +161,7 @@ export async function askAssistant({ question, uiLanguage }) {
   try {
     return await send();
   } catch (e) {
-    if (e instanceof AiError && e.retryable) return send();
+    if (shouldRetryImmediately(e)) return send();
     throw e;
   }
 }
@@ -179,7 +187,93 @@ export async function askSiteHelper({ question, uiLanguage }) {
   try {
     return await send();
   } catch (e) {
+    if (shouldRetryImmediately(e)) return send();
+    throw e;
+  }
+}
+
+/** A short silent WAV, so the speaker button can be tried without the AI service (mock mode only). */
+function silentWav(seconds = 0.4, rate = 8000) {
+  const samples = Math.floor(seconds * rate);
+  const buffer = new ArrayBuffer(44 + samples * 2);
+  const view = new DataView(buffer);
+  const write = (offset, text) => [...text].forEach((c, i) => view.setUint8(offset + i, c.charCodeAt(0)));
+  write(0, "RIFF"); view.setUint32(4, 36 + samples * 2, true); write(8, "WAVEfmt ");
+  view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+  view.setUint32(24, rate, true); view.setUint32(28, rate * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+  write(36, "data"); view.setUint32(40, samples * 2, true);
+  return new Blob([buffer], { type: "audio/wav" });
+}
+
+/**
+ * Read text aloud in English, Urdu or Sindhi. Returns an audio/wav Blob (the AI service uses Gemini speech).
+ * Read-only, so one automatic retry on retryable errors is safe.
+ */
+export async function speakText({ text, language }) {
+  if (USE_MOCKS) {
+    await wait(500);
+    return silentWav();
+  }
+  if (!AI_URL) throw new AiError({ code: "AI_UNAVAILABLE", message: "AI service is not configured." });
+  const send = async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS.speak);
+    try {
+      const res = await fetch(AI_URL + "/speak", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, language }),
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new AiError({
+          code: json.error?.code || "AI_UNAVAILABLE",
+          message: json.error?.message || "Could not read this aloud.",
+          retryable: !!json.error?.retryable,
+          requestId: json.requestId,
+        });
+      }
+      return await res.blob();
+    } catch (e) {
+      if (e instanceof AiError) throw e;
+      throw new AiError({
+        code: e.name === "AbortError" ? "AI_TIMEOUT" : "AI_UNAVAILABLE",
+        message: "Could not read this aloud.",
+        retryable: true,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+  try {
+    return await send();
+  } catch (e) {
     if (e instanceof AiError && e.retryable) return send();
+    throw e;
+  }
+}
+
+/**
+ * Translate a short text into English ("en"), Urdu ("ur") or Sindhi ("sd"). Used when the language is changed while an
+ * answer or a report summary is on screen. Immediate connection failures get one retry.
+ * Mock mode returns the text unchanged.
+ */
+export async function translateText({ text, targetLanguage }) {
+  if (USE_MOCKS) {
+    await wait(400);
+    return text;
+  }
+  const send = () => aiFetch("/translate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, targetLanguage }),
+    timeoutMs: TIMEOUT_MS.translate,
+  });
+  try {
+    return (await send()).text;
+  } catch (e) {
+    if (shouldRetryImmediately(e)) return (await send()).text;
     throw e;
   }
 }
