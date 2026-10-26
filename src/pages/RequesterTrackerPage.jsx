@@ -7,6 +7,24 @@ import { subscribeToDeliveryUpdates } from "../lib/realtime.js";
 import { useLang } from "../lib/i18n.jsx";
 
 const STEPS = ["tracker.stepReceived", "tracker.stepAllocated", "tracker.stepTransit", "tracker.stepDelivered"];
+const SELECTED_DELIVERY_KEY = "karwan.tracker.selectedDelivery";
+
+function savedDeliveryId() {
+  try {
+    return localStorage.getItem(SELECTED_DELIVERY_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function rememberDeliveryId(deliveryId) {
+  try {
+    if (deliveryId) localStorage.setItem(SELECTED_DELIVERY_KEY, deliveryId);
+    else localStorage.removeItem(SELECTED_DELIVERY_KEY);
+  } catch {
+    // Storage can be unavailable in private browsing; the in-memory selection still works.
+  }
+}
 
 function stepIndex(status) {
   if (status === "delivered") return 3;
@@ -19,7 +37,7 @@ export default function RequesterTrackerPage() {
   const { t, num, place, text, itemName } = useLang();
   const [overview, setOverview] = useState(null);
   const [deliveries, setDeliveries] = useState([]);
-  const [selectedId, setSelectedId] = useState("");
+  const [selectedId, setSelectedId] = useState(savedDeliveryId);
   const [connection, setConnection] = useState({ paused: false, mode: "polling" });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -29,7 +47,13 @@ export default function RequesterTrackerPage() {
     return subscribeToDeliveryUpdates({
       onData(data) {
         setDeliveries(data);
-        setSelectedId((current) => current || data[0]?.allocationId || "");
+        setSelectedId((current) => {
+          const next = data.some((entry) => entry.allocationId === current)
+            ? current
+            : data[0]?.allocationId || "";
+          rememberDeliveryId(next);
+          return next;
+        });
         setLoading(false);
       },
       onConnectionChange: setConnection,
@@ -50,7 +74,7 @@ export default function RequesterTrackerPage() {
       <div className="mx-auto max-w-5xl">
         <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
           <div><p className="text-xs font-semibold uppercase tracking-wider text-mute">{t("tracker.eyebrow")}</p><h1 className="mt-1 text-3xl font-extrabold">{t("tracker.title")}</h1><p className="mt-1 text-sm text-mute">{t("tracker.subtitle")}</p></div>
-          {deliveries.length > 1 && <select className="field w-auto" aria-label={t("tracker.chooseDelivery")} value={selectedId} onChange={(event) => setSelectedId(event.target.value)}>{deliveries.map((entry) => <option key={entry.allocationId} value={entry.allocationId}>{place(entry.area)}</option>)}</select>}
+          {deliveries.length > 1 && <select className="field w-auto" aria-label={t("tracker.chooseDelivery")} value={selectedId} onChange={(event) => { const next = event.target.value; setSelectedId(next); rememberDeliveryId(next); }}>{deliveries.map((entry) => <option key={entry.allocationId} value={entry.allocationId}>{place(entry.area)}</option>)}</select>}
         </div>
 
         {connection.paused && <p role="alert" className="mb-4 rounded-ui border border-wait bg-wait/10 px-4 py-3 text-sm">{t("common.livePaused")}</p>}
